@@ -1,6 +1,8 @@
 const express = require('express');
 const fs = require('fs').promises; // Use the promise-based fs module
 const path = require('path');
+const cors = require('cors');
+
 
 const app = express();
 const PORT = process.env.PORT || 3000; // Use environment port or default to 3000
@@ -11,6 +13,8 @@ const RESERVAS_FILE = path.join(__dirname, 'reservas.json');
 app.use(express.json());
 // Parse URL-encoded request bodies (useful if testing with HTML forms, though API usually uses JSON)
 app.use(express.urlencoded({ extended: true }));
+
+app.use(cors());
 
 // --- Constants & Helpers ---
 const businessHours = [
