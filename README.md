@@ -1,4 +1,3 @@
-```markdown
 # API REST - Reserva de Horas para Estudio de Abogados
 
 Esta API REST permite gestionar la consulta de horarios disponibles y la creación de reservas para un estudio de abogados. Está desarrollada en Node.js con Express y utiliza un archivo `reservas.json` como almacenamiento simple de datos.
@@ -177,4 +176,3 @@ La API utiliza códigos de estado HTTP estándar para indicar el resultado de la
 *   `500 Internal Server Error`: Error inesperado en el servidor (ej. problemas al leer/escribir el archivo de datos).
 
 Las respuestas de error (`40x`, `5xx`) generalmente incluyen un cuerpo JSON con un campo `error` o `message` descriptivo, y en caso de errores de validación (400), puede incluir un objeto `errors` detallando los campos específicos.
-```
