@@ -4,6 +4,8 @@ const fs = require('fs');
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
+const path = require('path');
+
 require('dotenv').config();
 
 // Capturar argumentos de línea de comandos
@@ -110,6 +112,23 @@ async function ensureTableExists() {
 ensureTableExists();
 
 // --- API Endpoints ---
+
+// --- API Documentation Endpoint --- // <--- AÑADIR ESTA SECCIÓN
+// Sirve el archivo HTML de documentación en la ruta raíz '/'
+app.get('/', (req, res) => {
+    res.sendFile(path.join(__dirname, 'api-docs.html'), (err) => {
+      if (err) {
+        console.error("Error sending documentation file:", err);
+        // Si el archivo no se encuentra o hay otro error al enviarlo,
+        // envía un error 500 genérico o un 404 específico para el archivo.
+        if (!res.headersSent) { // Evita enviar respuesta si ya se envió una parcial
+           res.status(500).send("Error loading API documentation.");
+        }
+      }
+    });
+  });
+
+
 
 // GET /slots?date=YYYY-MM-DD
 app.get('/slots', async (req, res) => {
