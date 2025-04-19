@@ -1,34 +1,36 @@
+const https = require('https');
+const http = require('http');
+const fs = require('fs');
 const express = require('express');
-const path = require('path');
 const cors = require('cors');
-const { Pool } = require('pg'); // Importar el Pool de pg
-require('dotenv').config(); // Cargar variables de entorno desde .env
+const { Pool } = require('pg');
+require('dotenv').config();
+
+// Capturar argumentos de línea de comandos
+const args = process.argv.slice(2);
+const serverMode = args[0] && args[0].toLowerCase() === 'http' ? 'http' : 'https';
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT_HTTP = process.env.PORT || 3000;
+const PORT_HTTPS = 443;
+
+// Opciones HTTPS (solo se usarán en modo HTTPS)
+const httpsOptions = {
+  key: fs.readFileSync('key.pem'),
+  cert: fs.readFileSync('cert.pem')
+};
 
 // --- Database Connection Pool ---
-// La biblioteca 'pg' buscará AUTOMÁTICAMENTE la variable de entorno DATABASE_URL
-// si no se pasan credenciales explícitas aquí.
-// Si DATABASE_URL no está definida, entonces buscará PGHOST, PGUSER, etc.
 const pool = new Pool({
-    // No necesitas pasar connectionString explícitamente si usas la variable de entorno DATABASE_URL.
-    // connectionString: process.env.DATABASE_URL, // Podrías hacerlo explícito, pero no es necesario.
-
-    // ¡IMPORTANTE para producción/hosting! A menudo necesitas configurar SSL.
-    // Incluso si tu DATABASE_URL incluye '?ssl=true', a veces necesitas
-    // especificar opciones adicionales aquí, especialmente si usas certificados
-    // autofirmados o en plataformas como Heroku/Render que pueden requerirlo.
+    // La biblioteca 'pg' buscará AUTOMÁTICAMENTE la variable de entorno DATABASE_URL
     // ssl: {
-    //   rejectUnauthorized: false // ¡Usar con precaución! Deshabilita la verificación del certificado.
-                                 // Necesario en algunas plataformas o con certificados autofirmados.
+    //   rejectUnauthorized: false 
     // }
 });
 
-// Probar la conexión a la BD al iniciar (sin cambios)
+// Probar la conexión a la BD al iniciar
 pool.connect((err, client, release) => {
     if (err) {
-        // Si hay un error aquí, verifica tu DATABASE_URL y la configuración SSL.
         console.error('Error acquiring client for initial connection test using DATABASE_URL.', err.stack);
         return;
     }
@@ -42,18 +44,18 @@ pool.connect((err, client, release) => {
     });
 });
 
-// --- Middleware (sin cambios) ---
+// --- Middleware ---
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cors());
 
-// --- Constants & Helpers (sin cambios) ---
+// --- Constants & Helpers ---
 const businessHours = [
     "09:00", "10:00", "11:00",
     "12:00", "14:00", "15:00",
     "16:00", "17:00"
 ];
-// ... (resto de funciones helper: getCurrentDateString, getCurrentTimeString, isValidDate, isWeekday) ...
+
 function getCurrentDateString() {
     const today = new Date();
     const year = today.getFullYear();
@@ -61,15 +63,18 @@ function getCurrentDateString() {
     const day = String(today.getDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
 }
+
 function getCurrentTimeString() {
     const today = new Date();
     const hours = String(today.getHours()).padStart(2, '0');
     const minutes = String(today.getMinutes()).padStart(2, '0');
     return `${hours}:${minutes}`;
 }
+
 function isValidDate(dateString) {
     return /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(dateString);
 }
+
 function isWeekday(dateString) {
     try {
         const date = new Date(`${dateString}T12:00:00`);
@@ -80,8 +85,7 @@ function isWeekday(dateString) {
     }
 }
 
-
-// --- Helper Function to Create Table (sin cambios) ---
+// --- Helper Function to Create Table ---
 async function ensureTableExists() {
     const createTableQuery = `
         CREATE TABLE IF NOT EXISTS reservations (
@@ -105,7 +109,7 @@ async function ensureTableExists() {
 }
 ensureTableExists();
 
-// --- API Endpoints (sin cambios en la lógica interna, ya usan 'pool') ---
+// --- API Endpoints ---
 
 // GET /slots?date=YYYY-MM-DD
 app.get('/slots', async (req, res) => {
@@ -206,7 +210,7 @@ app.post('/book', async (req, res) => {
     }
 });
 
-// --- Catch-all & Error Handler (sin cambios) ---
+// --- Catch-all & Error Handler ---
 app.use((req, res) => {
     res.status(404).json({ error: 'Not Found' });
 });
@@ -215,11 +219,15 @@ app.use((err, req, res, next) => {
     res.status(500).json({ error: 'An unexpected internal server error occurred.' });
 });
 
-// --- Start Server (sin cambios) ---
-app.listen(PORT, () => {
-    console.log(`Server listening on port ${PORT}`);
-    console.log('Attempting to connect to PostgreSQL using DATABASE_URL (or PG* vars if not set)...');
-    console.log('Endpoints:');
-    console.log(`  GET  http://localhost:${PORT}/slots?date=YYYY-MM-DD`);
-    console.log(`  POST http://localhost:${PORT}/book`);
-});
+// --- Start Server based on mode ---
+if (serverMode === 'http') {
+    http.createServer(app).listen(PORT_HTTP, () => {
+        console.log(`Servidor HTTP iniciado en puerto ${PORT_HTTP}`);
+        console.log(`Modo de ejecución: HTTP`);
+    });
+} else {
+    https.createServer(httpsOptions, app).listen(PORT_HTTPS, () => {
+        console.log(`Servidor HTTPS iniciado en puerto ${PORT_HTTPS}`);
+        console.log(`Modo de ejecución: HTTPS (predeterminado)`);
+    });
+}
