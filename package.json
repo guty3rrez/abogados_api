@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "start": "node src/server.js",
+    "start:http": "node src/server.js",
+    "start:https": "node src/server.js https",
+    "dev": "nodemon src/server.js https",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -15,6 +19,9 @@
     "express": "^5.1.0",
     "fs": "^0.0.1-security",
     "https": "^1.0.0",
-    "pg": "^8.14.1"
+    "pg": "^8.15.6"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }
