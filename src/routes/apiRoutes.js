@@ -1,7 +1,8 @@
 const express = require('express');
 const slotsController = require('../controllers/slotsController');
 const bookingController = require('../controllers/bookingController');
-
+const shippingController = require('../controllers/shippingController'); // Ajusta la ruta
+const paymentController = require('../controllers/paymentController'); // Ajusta la ruta
 const router = express.Router();
 
 // Ruta para obtener los horarios disponibles para una fecha
@@ -13,5 +14,14 @@ router.get('/slots', slotsController.getAvailableSlots);
 router.post('/book', bookingController.createBooking);
 
 // Puedes añadir más rutas aquí
+
+//POST /api/shipping
+router.post('/shipping', shippingController.createShippingInfo);
+
+//POST /api/createPayment
+router.post('/createPayment', paymentController.createPayment);
+
+//POST /api/validatePayment
+router.get('/validatePayment', paymentController.validatePayment);
 
 module.exports = router;
