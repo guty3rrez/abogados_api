@@ -10,7 +10,9 @@ const env = require('./config/env'); // Carga la configuración del entorno
 const app = express();
 
 // --- Middleware Esenciales ---
-app.use(cors()); // Habilita CORS para todas las rutas (ajusta según necesidad)
+app.use(cors({
+  origin: '*', // Permite CORS desde un origen específico o todos (ajusta según necesidad)
+})); // Habilita CORS para todas las rutas (ajusta según necesidad)
 app.use(express.json()); // Parsea bodies de request JSON
 app.use(express.urlencoded({ extended: true })); // Parsea bodies de request URL-encoded
 

@@ -1,13 +1,11 @@
 const WebpayPlus = require("transbank-sdk").WebpayPlus; 
 const { Options, IntegrationApiKeys, Environment, IntegrationCommerceCodes } = require("transbank-sdk");
-const { generarStringAleatorio } = require("../utils/random");
 
 // Versión 3.x del SDK
 const tx = new WebpayPlus.Transaction(new Options(IntegrationCommerceCodes.WEBPAY_PLUS, IntegrationApiKeys.WEBPAY, Environment.Integration));
 
-const createTransaction = async (reservation_id) => {
-
-    const buyOrder = generarStringAleatorio(12); // Genera un número de orden de compra aleatorio
+const createTransaction = async (buyOrder, reservation_id) => {
+ // Genera un número de orden de compra aleatorio
     const sessionId = reservation_id.toString(); // ID de sesión del usuario
     const amount = 5000; // Monto de la transacción
     const returnUrl = "https://localhost:443/validatePayment"; // URL de retorno después de la transacción

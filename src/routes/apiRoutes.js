@@ -22,6 +22,6 @@ router.post('/shipping', shippingController.createShippingInfo);
 router.post('/createPayment', paymentController.createPayment);
 
 //POST /api/validatePayment
-router.get('/validatePayment', paymentController.validatePayment);
+router.post('/validatePayment', paymentController.validatePayment);
 
 module.exports = router;

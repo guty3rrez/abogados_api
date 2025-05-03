@@ -1,3 +1,5 @@
+// --- START OF FILE database.js ---
+
 const { Pool } = require('pg');
 const env = require('./env'); // Importa las variables de entorno cargadas
 
@@ -13,7 +15,7 @@ const pool = new Pool(poolConfig);
 pool.connect((err, client, release) => {
     if (err) {
         console.error('Error acquiring client for initial connection test.', err.stack);
-        // Considera terminar la aplicación si la conexión falla al inicio
+        // Consider exiting the process if DB connection is critical
         // process.exit(1);
         return;
     }
@@ -23,18 +25,34 @@ pool.connect((err, client, release) => {
         if (err) {
             return console.error('Error executing initial test query', err.stack);
         }
-        console.log('Test query successful. Current DB time:', result.rows[0].now);
+        console.log('Test query successful.');
     });
 });
 
-// --- Helper Function to Create/Ensure Table Structure ---
-/**
- * Asegura que las tablas 'reservations', 'shipping' y 'transactions' existan en la base de datos.
- * Crea las tablas si no existen.
- */
-async function ensureTableExists() {
-    // Query para crear/verificar la tabla 'reservations'
-    const createReservationsTableQuery = `
+// --- Función unificada para crear/actualizar la estructura de la base de datos ---
+async function setupDatabase() {
+    const setupQueries = [
+        `-- Función para actualizar timestamp
+        CREATE OR REPLACE FUNCTION trigger_set_timestamp()
+        RETURNS TRIGGER AS $$
+        BEGIN
+          -- Check if the updated_at column exists before trying to set it
+          IF TG_OP = 'UPDATE' THEN
+             -- Use dynamic check as table name can vary if trigger is reused
+             IF EXISTS (
+                 SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = TG_TABLE_SCHEMA
+                   AND table_name = TG_TABLE_NAME
+                   AND column_name = 'updated_at'
+             ) THEN
+                 NEW.updated_at = NOW();
+             END IF;
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;`,
+
+        `-- Tabla reservations
         CREATE TABLE IF NOT EXISTS reservations (
             id SERIAL PRIMARY KEY,
             fecha DATE NOT NULL,
@@ -43,36 +61,13 @@ async function ensureTableExists() {
             email TEXT NOT NULL,
             telefono TEXT NOT NULL,
             motivo TEXT,
-            estado_pago VARCHAR(10) NOT NULL DEFAULT 'Pendiente' CHECK (estado_pago IN ('Rechazado', 'Pendiente', 'Aprobado')),
+            monto DECIMAL(10, 2) NOT NULL DEFAULT 0,
+            estado_pago VARCHAR(10) NOT NULL DEFAULT 'Pendiente' CHECK (estado_pago IN ('Rechazado', 'Pendiente', 'Aprobado', 'Anulado')),
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (fecha, hora) -- Restricción para evitar duplicados en la misma fecha y hora
-        );
-    `;
+            UNIQUE (fecha, hora)
+        );`,
 
-    // Query para asegurar la columna 'estado_pago' en 'reservations' (por si la tabla ya existía sin ella)
-    // Nota: Esta query ya está cubierta por la definición en createReservationsTableQuery si la tabla no existe.
-    // Es útil si la tabla ya existía pero sin esta columna/constraint.
-    const alterReservationsTableQuery = `
-        DO $$
-        BEGIN
-            IF NOT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name='reservations' AND column_name='estado_pago'
-            ) THEN
-                ALTER TABLE reservations
-                ADD COLUMN estado_pago VARCHAR(10) NOT NULL DEFAULT 'Pendiente' CHECK (estado_pago IN ('Rechazado', 'Pendiente', 'Aprobado'));
-            ELSE
-                -- Si la columna existe, aseguramos que la constraint CHECK esté presente (puede fallar si hay datos inválidos)
-                -- O simplemente podemos asumir que si la columna existe, está bien definida por la CREATE TABLE inicial.
-                -- Para simplificar, no añadiremos la constraint aquí si la columna ya existe,
-                -- confiando en que fue creada correctamente o se manejará manualmente.
-                RAISE NOTICE 'Column estado_pago already exists in reservations.';
-            END IF;
-        END $$;
-    `;
-
-    // Query para crear/verificar la tabla 'shipping'
-    const createShippingTableQuery = `
+        `-- Tabla shipping
         CREATE TABLE IF NOT EXISTS shipping (
             id SERIAL PRIMARY KEY,
             reservation_id INTEGER NOT NULL,
@@ -90,114 +85,105 @@ async function ensureTableExists() {
                 FOREIGN KEY(reservation_id)
                 REFERENCES reservations(id)
                 ON DELETE CASCADE
-        );
-    `;
-    // Opcional: Crear un índice en shipping.reservation_id para búsquedas más rápidas
-    const createShippingIndexQuery = `
-        CREATE INDEX IF NOT EXISTS idx_shipping_reservation_id ON shipping(reservation_id);
-    `;
+        );`,
 
-    // --- NUEVA QUERY PARA CREAR LA TABLA 'transactions' ---
-    const createTransactionsTableQuery = `
+        `-- Índice para shipping
+        CREATE INDEX IF NOT EXISTS idx_shipping_reservation_id ON shipping(reservation_id);`,
+
+        `-- Tabla transactions
         CREATE TABLE IF NOT EXISTS transactions (
             id SERIAL PRIMARY KEY,
-            reservation_id INTEGER NOT NULL, -- Clave foránea que apunta a reservations.id
-            transbank_token TEXT NULL, -- Token de Transbank (puede ser nulo inicialmente)
-            status VARCHAR(30) NOT NULL DEFAULT 'INITIALIZED' CHECK (status IN ('INITIALIZED', 'AUTHORIZED', 'REVERSED', 'FAILED', 'NULLIFIED', 'PARTIALLY_NULLIFIED', 'CAPTURED')),
-            buy_order VARCHAR(255) NOT NULL, -- Orden de compra (ajusta longitud si es necesario)
+            reservation_id INTEGER NOT NULL,
+            transbank_token TEXT NULL UNIQUE, -- Added UNIQUE constraint for easier lookup
+            buy_order VARCHAR(255) NOT NULL UNIQUE, -- Added UNIQUE constraint
+            session_id VARCHAR(255),
+            amount DECIMAL(12, 2), -- Increased precision slightly
+            status VARCHAR(30) NOT NULL DEFAULT 'INITIALIZED'
+                CHECK (status IN ('INITIALIZED', 'AUTHORIZED', 'REVERSED', 'FAILED',
+                                'NULLIFIED', 'PARTIALLY_NULLIFIED', 'CAPTURED',
+                                'TIMEOUT', 'ABORTED', 'REFUNDED', 'COMMIT_ERROR')), -- Added COMMIT_ERROR
+            payment_type_code VARCHAR(30),
+            card_number VARCHAR(20), -- Typically only last 4 digits are stored
+            transaction_date TIMESTAMP WITH TIME ZONE,
+            authorization_code VARCHAR(30),
+            response_code SMALLINT, -- Added: Usually an integer
+            vci VARCHAR(10),       -- Added: Check Transbank docs for typical length
+            installments_amount DECIMAL(12, 2), -- Added
+            installments_number SMALLINT,       -- Added
+            balance DECIMAL(12, 2) NULL,        -- Added: Can be null if not applicable
+            refunded_amount DECIMAL(12, 2),
             created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP, -- Para rastrear cambios de estado
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
 
-            -- Definir la clave foránea que relaciona transactions con reservations
             CONSTRAINT fk_transaction_reservation
                 FOREIGN KEY(reservation_id)
                 REFERENCES reservations(id)
-                ON DELETE CASCADE -- Si se borra una reserva, se borran sus transacciones asociadas. Considera RESTRICT o SET NULL si prefieres otro comportamiento.
-        );
-    `;
+                ON DELETE CASCADE
+        );`,
 
-    // --- ÍNDICES OPCIONALES PARA 'transactions' ---
-    const createTransactionsReservationIndexQuery = `
+        `-- Índices para transactions
         CREATE INDEX IF NOT EXISTS idx_transactions_reservation_id ON transactions(reservation_id);
-    `;
-    const createTransactionsTokenIndexQuery = `
-        CREATE INDEX IF NOT EXISTS idx_transactions_transbank_token ON transactions(transbank_token); -- Útil si buscas por token
-    `;
-     const createTransactionsBuyOrderIndexQuery = `
-        CREATE INDEX IF NOT EXISTS idx_transactions_buy_order ON transactions(buy_order); -- Útil si buscas por buy_order
-    `;
+        CREATE INDEX IF NOT EXISTS idx_transactions_transbank_token ON transactions(transbank_token);
+        CREATE INDEX IF NOT EXISTS idx_transactions_buy_order ON transactions(buy_order);`,
 
-    // Trigger para actualizar automáticamente 'updated_at' en 'transactions' (Opcional pero recomendado)
-     const createUpdatedAtTriggerFunctionQuery = `
-        CREATE OR REPLACE FUNCTION trigger_set_timestamp()
-        RETURNS TRIGGER AS $$
-        BEGIN
-          NEW.updated_at = NOW();
-          RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-    `;
-     const createUpdatedAtTriggerQuery = `
-        DROP TRIGGER IF EXISTS set_timestamp ON transactions; -- Borra el trigger viejo si existe
+        // --- Use ALTER TABLE to add columns if they don't exist ---
+        `DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'updated_at') THEN
+                ALTER TABLE transactions ADD COLUMN updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'response_code') THEN
+                ALTER TABLE transactions ADD COLUMN response_code SMALLINT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'vci') THEN
+                ALTER TABLE transactions ADD COLUMN vci VARCHAR(10);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'installments_amount') THEN
+                ALTER TABLE transactions ADD COLUMN installments_amount DECIMAL(12, 2);
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'installments_number') THEN
+                ALTER TABLE transactions ADD COLUMN installments_number SMALLINT;
+            END IF;
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'transactions' AND column_name = 'balance') THEN
+                ALTER TABLE transactions ADD COLUMN balance DECIMAL(12, 2) NULL; -- Allow NULL
+            END IF;
+        END $$;`,
+
+        `-- Trigger para actualizar automáticamente 'updated_at' en 'transactions'
+        DROP TRIGGER IF EXISTS set_timestamp ON transactions;
         CREATE TRIGGER set_timestamp
         BEFORE UPDATE ON transactions
         FOR EACH ROW
-        EXECUTE PROCEDURE trigger_set_timestamp();
-    `;
-
+        EXECUTE PROCEDURE trigger_set_timestamp();`
+    ];
 
     let client;
     try {
-        client = await pool.connect(); // Obtiene un cliente del pool
-
-        // 1. Asegurar que la tabla 'reservations' existe y tiene la columna 'estado_pago'
-        await client.query(createReservationsTableQuery);
-        console.log("Table 'reservations' checked/created successfully.");
-        // Ejecutar ALTER sólo si es estrictamente necesario (la lógica DO $$ la maneja)
-        // await client.query(alterReservationsTableQuery); // Comentado porque CREATE TABLE IF NOT EXISTS ya lo cubre si es nueva.
-        // console.log("Column 'estado_pago' in 'reservations' checked/added successfully.");
-
-        // 2. Asegurar que la tabla 'shipping' existe (depende de 'reservations' por la FK)
-        await client.query(createShippingTableQuery);
-        console.log("Table 'shipping' checked/created successfully.");
-        await client.query(createShippingIndexQuery);
-        console.log("Index 'idx_shipping_reservation_id' on 'shipping' checked/created successfully.");
-
-        // --- 3. Asegurar que la tabla 'transactions' existe (depende de 'reservations' por la FK) ---
-        await client.query(createTransactionsTableQuery);
-        console.log("Table 'transactions' checked/created successfully.");
-
-        // --- 4. Crear índices para 'transactions' ---
-        await client.query(createTransactionsReservationIndexQuery);
-        console.log("Index 'idx_transactions_reservation_id' on 'transactions' checked/created successfully.");
-        await client.query(createTransactionsTokenIndexQuery);
-        console.log("Index 'idx_transactions_transbank_token' on 'transactions' checked/created successfully.");
-        await client.query(createTransactionsBuyOrderIndexQuery);
-        console.log("Index 'idx_transactions_buy_order' on 'transactions' checked/created successfully.");
-
-        // --- 5. (Opcional) Crear la función y el trigger para updated_at en transactions ---
-        await client.query(createUpdatedAtTriggerFunctionQuery);
-        console.log("Function 'trigger_set_timestamp' created/updated successfully.");
-        await client.query(createUpdatedAtTriggerQuery);
-        console.log("Trigger 'set_timestamp' on 'transactions' created successfully.");
-
-
+        client = await pool.connect();
+        // Execute each query sequentially
+        for (const query of setupQueries) {
+            await client.query(query);
+        }
+        console.log("Database setup/update completed successfully.");
     } catch (err) {
-        console.error("Error during database table setup:", err.stack); // Mostrar el stack trace completo
-        // Considera manejar este error de forma más robusta
+        console.error("Error during database setup/update:", err.stack);
+        // Optionally re-throw or handle more gracefully
         // throw err;
     } finally {
         if (client) {
-            client.release(); // Siempre libera el cliente de vuelta al pool
-            console.log("Database client released after table setup.");
+            client.release();
         }
     }
 }
 
-// Llama a la función para asegurar que las tablas existan al iniciar el módulo
-ensureTableExists();
+// Inicializar la base de datos al cargar el módulo
+setupDatabase().catch(err => {
+    console.error("Failed to initialize database on startup:", err);
+    // Consider exiting if DB setup fails critically
+    // process.exit(1);
+});
 
 module.exports = {
-    pool, // Exporta el pool para usarlo en los controladores
-    query: (text, params) => pool.query(text, params), // Método de conveniencia para ejecutar consultas
+    pool,
+    query: (text, params) => pool.query(text, params),
 };
+// --- END OF FILE database.js ---
