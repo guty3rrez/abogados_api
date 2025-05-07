@@ -1,125 +1,152 @@
 const db = require('../config/database'); // Importa la configuración de la base de datos
 
-// POST /shipping
-const createShippingInfo = async (req, res, next) => {
-    // 1. Extract data from request body
-    const {
-        reservation_id,
-        email,
-        calle,
-        numero,
-        depto, // Optional field
-        region,
-        provincia,
-        codigo_postal // Optional field
-    } = req.body;
 
-    // 2. Basic Input Validation (Security & Integrity)
-    // Check for required fields
-    if (!reservation_id || !email || !calle || !numero || !region || !provincia) {
-        return res.status(400).json({
-            success: false,
-            error: "Missing required fields. Required: reservation_id, email, calle, numero, region, provincia."
-        });
+const createQuote = async (originCountyCode, destinationCountyCode) => {
+
+    //Petición POST a la API de Chilexpress para obtener la cotización
+    url = "https://testservices.wschilexpress.com/rating/api/v1.0/rates/courier";
+    
+    // Definir los parámetros mínimos para la cotización
+    headers = {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "Ocp-Apim-Subscription-Key": "5ec28a9603274d8db7510049580feaa6"
+
+    }
+    body = {
+        "originCountyCode": originCountyCode,
+        "destinationCountyCode": destinationCountyCode,
+        "package": {
+            "weight": "1",
+            "height": "1",
+            "width": "1",
+            "length": "1",
+        },
+        "productType": 1, //1 Documento, 3 Encomienda
+        "contentType": 1, //Descripción del contenido declarado
+        "declaredWorth": "1000", //Valor declarado del paquete.
     }
 
-    // Validate reservation_id format (should be a number)
-    if (isNaN(parseInt(reservation_id))) {
-         return res.status(400).json({ success: false, error: "Invalid reservation_id format. Must be a number." });
+    ```
+    Respuesta de la API de Chilexpress para la cotización
+    {
+        "data": {
+            "courierServiceOptions": [{
+                "serviceTypeCode": 41,
+                "serviceDescription": "Enc. Grandes",
+                "didUseVolumetricWeight": false,
+                "finalWeight": "16.00",
+                "serviceValue": "8715",
+                "conditions": "",
+                "deliveryType": 0,
+                "additionalServices": []
+            }, {
+                "serviceTypeCode": 43,
+                "serviceDescription": "Log Dev Enc. Grandes",
+                "didUseVolumetricWeight": false,
+                "finalWeight": "16.00",
+                "serviceValue": "8715",
+                "conditions": "",
+                "deliveryType": 0,
+                "additionalServices": []
+            }, {
+                "serviceTypeCode": 45,
+                "serviceDescription": "Log Dev Especial Enc. Grandes",
+                "didUseVolumetricWeight": false,
+                "finalWeight": "16.00",
+                "serviceValue": "8715",
+                "conditions": "",
+                "deliveryType": 0,
+                "additionalServices": []
+            }]
+        },
+        "statusCode": 0,
+        "statusDescription": "OK",
+        "errors": null
     }
-    const reservationIdInt = parseInt(reservation_id);
-
-    // Basic email format validation (can be enhanced)
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (typeof email !== 'string' || !emailRegex.test(email)) {
-         return res.status(400).json({ success: false, error: "Invalid email format." });
-    }
-
-    // Basic type checks for other required string fields
-    if (typeof calle !== 'string' || typeof numero !== 'string' || typeof region !== 'string' || typeof provincia !== 'string') {
-        return res.status(400).json({ success: false, error: "Invalid data type for calle, numero, region, or provincia. Must be strings." });
-    }
-
-    // Optional fields validation (if provided, should be string)
-    if (depto && typeof depto !== 'string') {
-        return res.status(400).json({ success: false, error: "Invalid data type for depto. Must be a string if provided." });
-    }
-    if (codigo_postal && typeof codigo_postal !== 'string') {
-        return res.status(400).json({ success: false, error: "Invalid data type for codigo_postal. Must be a string if provided." });
-    }
-
-    try {
-        // 3. Verify Reservation Existence (Association)
-        // Check if the reservation_id exists in the reservations table
-        const reservationCheckQuery = 'SELECT id FROM reservations WHERE id = $1';
-        const reservationResult = await db.query(reservationCheckQuery, [reservationIdInt]);
-
-        if (reservationResult.rows.length === 0) {
-            // If no reservation found with that ID, return 404
-            return res.status(404).json({
-                success: false,
-                error: `Reservation with ID ${reservationIdInt} not found.`
-            });
-        }
-
-        // --- Optional Check: Prevent duplicate shipping info ---
-        // You might want to prevent adding shipping info if it already exists for this reservation
-        const existingShippingQuery = 'SELECT id FROM shipping WHERE reservation_id = $1';
-        const existingShippingResult = await db.query(existingShippingQuery, [reservationIdInt]);
-        if (existingShippingResult.rows.length > 0) {
-            return res.status(409).json({ // 409 Conflict is appropriate here
-                success: false,
-                error: `Shipping information already exists for reservation ID ${reservationIdInt}.`
-             });
-            // Alternatively, you could implement an UPDATE logic here if you want to allow changes.
-        }
-        // --- End Optional Check ---
-
-
-        // 4. Insert Shipping Information into Database
-        // Use parameterized queries ($1, $2, ...) to prevent SQL injection
-        const insertQuery = `
-            INSERT INTO shipping (
-                reservation_id, email, calle, numero, depto, region, provincia, codigo_postal
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-            RETURNING id, reservation_id, status, created_at; -- Return the newly created shipping record details
-        `;
-
-        // Prepare values, using null for optional fields if they weren't provided
-        const values = [
-            reservationIdInt,
-            email,
-            calle,
-            numero,
-            depto || null, // Use null if depto is falsy (empty string, null, undefined)
-            region,
-            provincia,
-            codigo_postal || null // Use null if codigo_postal is falsy
-        ];
-
-        const insertResult = await db.query(insertQuery, values);
-        const newShippingInfo = insertResult.rows[0];
-
-        // 5. Send Success Response
-        res.status(201).json({ // 201 Created is standard for successful POST requests that create a resource
-            success: true,
-            message: "Shipping information successfully saved.",
-            shipping: {
-                id: newShippingInfo.id,
-                reservation_id: newShippingInfo.reservation_id,
-                status: newShippingInfo.status, // Will be 'Pendiente' by default from the table definition
-                created_at: newShippingInfo.created_at
-            }
-        });
-
-    } catch (error) {
-        console.error("Error in POST /shipping:", error);
-        // Pass the error to the Express error handling middleware
-        next(error);
-    }
+    ```
+    
 };
 
+
+const createShipping = async (countyOfOriginCoverageCode, streetName, streetNumber, fullName, phoneNumber, mail, serviceDeliveryCode, deliveryReference, groupReference ) => {
+
+    //Petición POST para generar envío a la API de Chilexpress
+    url = "https://testservices.wschilexpress.com/transport-orders/api/v{version}/transport-orders";
+
+    headers = {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache",
+        "Ocp-Apim-Subscription-Key": "629ab4a902d54239989cd1c2f3d20dfa"
+
+    }
+    // Definir los parámetros mínimos para el envío
+    body = {
+        "header": {
+            "customerCardNumber": "18578680", //Número de Tarjeta Cliente de Chilexpress (TCC) - Este es el utilizado para pruebas
+            "countyOfOriginCoverageCode": countyOfOriginCoverageCode, //Código de la comuna de origen
+            "labelType": 2,
+        },
+        "details": [{
+            "addresses": [{ //Dirección de DESTINO
+                "countyCoverageCode": countyOfOriginCoverageCode,
+                "streetName": streetName,
+                "streetNumber": streetNumber,
+                "supplement": "",
+                "addressType": "DEST",
+                "observation": "DEFAULT"
+            }, { //Dirección de DEVOLUCIÓN
+                "countyCoverageCode": "PLCA",
+                "streetName": "SARMIENTO",
+                "streetNumber": 120,
+                "supplement": "DEFAULT",
+                "addressType": "DEV",
+                "deliveryOnCommercialOffice": false,
+                "observation": "DEFAULT"
+            }],
+            "contacts": [{ //Datos de contacto de DESTINATARIO
+                "name": fullName,
+                "phoneNumber": phoneNumber,
+                "mail": mail,
+                "contactType": "D"
+            }, { //Datos de contacto de REMITENTE
+                "name": "Felipe Gutiérrez",
+                "phoneNumber": "940647280",
+                "mail": "felipe.gutierrezmu@correoaiep.cl",
+                "contactType": "R"
+            }],
+            "packages": [{
+                "weight": "1",
+                "height": "1",
+                "width": "1",
+                "length": "1",
+                "serviceDeliveryCode": serviceDeliveryCode,
+                "productCode": "1", //1 Documento, 3 Encomienda
+                "deliveryReference": deliveryReference,
+                "groupReference": groupReference,
+                "declaredValue": "1000",
+                "declaredContent": "1",
+                "receivableAmountInDelivery": 1000
+            }]
+        }]
+    }
+
+
+}
+
+// POST /api/shipping
+const sendShipping = async (req, res, next) => {
+    const { reservation_id } = req.body;
+    //TODO: Obtener variables de la base de datos con reservation_id
+
+    //Con los valores llamar a 
+    //createQuote(originCountyCode, destinationCountyCode)
+    //createShipping(countyOfOriginCoverageCode, streetName, streetNumber, fullName, phoneNumber, mail, serviceDeliveryCode, deliveryReference, groupReference)
+    
+
+}
+
+
 module.exports = {
-    createShippingInfo,
+    sendShipping
 };
