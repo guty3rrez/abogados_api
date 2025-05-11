@@ -14,20 +14,14 @@ const createPayment = async (req, res, next) => {
             return res.status(400).json({ error: "El ID de reserva es requerido" });
         }
         
-        console.log("ID de la reserva:", reservation_id);
-        
         // Generar orden de compra única
         const buyOrder = generarStringAleatorio(12);
         // Crear ID de sesión único
         const sessionId = "S-" + reservation_id;
-        
-        // Obtener el monto de la reserva (aquí deberías implementar tu propia lógica)
-        // Por ahora suponemos que tienes una función que obtiene el monto
-        const amount = 5000//await getReservationAmount(reservation_id);
-        
+        // Costo de la reserva
+        const amount = 5000
         // URL de retorno donde el usuario será redirigido después del pago
         const returnUrl = `${req.protocol}://localhost:5173/confirmation`;
-        
         // Crear transacción en Transbank
         const createResponse = await (new WebpayPlus.Transaction()).create(
             buyOrder,
@@ -40,7 +34,6 @@ const createPayment = async (req, res, next) => {
             console.error("Error al crear el pago:", createResponse);
             return res.status(500).json({ error: "Error al crear el pago" });
         }
-        
         // Guardar información de la transacción en la base de datos
         try {
             await db.query(
@@ -50,7 +43,6 @@ const createPayment = async (req, res, next) => {
             console.log("Información de la transacción guardada en la base de datos.");
         } catch (dbError) {
             console.error("Error al guardar información de la transacción:", dbError);
-            // Continuamos con el proceso a pesar del error en la BD
         }
 
         console.log("Transacción creada con éxito:", createResponse);
@@ -66,7 +58,7 @@ const createPayment = async (req, res, next) => {
 
 /**
  * Valida y procesa el resultado de una transacción
- * POST/GET /api/validatePayment
+ * POST/ /api/validatePayment
  */
 const validatePayment = async (req, res, next) => {
     let token_ws = null;
@@ -75,18 +67,12 @@ const validatePayment = async (req, res, next) => {
     let tbkIdSesion = null;
 
     try {
-        // Transbank puede enviar los datos por POST o GET dependiendo del flujo
-        // Es más robusto verificar ambos: req.body para POST, req.query para GET
-        const params = { ...req.query, ...req.body };
-
+        // Obtener parámetros de la solicitud
+        const params = req.body;
         token_ws = params.token_ws;
         tbkToken = params.TBK_TOKEN;
         tbkOrdenCompra = params.TBK_ORDEN_COMPRA;
         tbkIdSesion = params.TBK_ID_SESION;
-
-        // Registrar todos los parámetros recibidos para depuración
-        console.log("Parámetros recibidos en validatePayment:", params);
-        console.log(`Valores extraídos: token_ws=${token_ws}, TBK_TOKEN=${tbkToken}, TBK_ORDEN_COMPRA=${tbkOrdenCompra}, TBK_ID_SESION=${tbkIdSesion}`);
 
         // --- Flujo 1: Retorno Normal (OK o Rechazado tras intentar pagar) ---
         // Solo llega token_ws. Puede ser éxito o rechazo, pero el usuario completó el flujo en Webpay.
@@ -132,7 +118,7 @@ const validatePayment = async (req, res, next) => {
                     return res.status(200).json({
                         success: true,
                         message: 'Pago validado y aprobado con éxito.',
-                        transaction: commitResponse // Devuelve toda la info útil
+                        transaction: commitResponse 
                     });
 
                 } else {
@@ -176,7 +162,7 @@ const validatePayment = async (req, res, next) => {
                     await db.query("UPDATE reservations SET estado_pago = 'Anulado' WHERE id = (SELECT reservation_id FROM transactions WHERE transbank_token = $1 LIMIT 1)", [token_ws]);
 
                      console.log("BD actualizada: Transacción y Reserva ANULADAS (detectado en commit).");
-                     return res.status(400).json({ // Puede ser 400 o un código más específico si lo deseas
+                     return res.status(400).json({
                         success: false,
                         message: 'El pago fue anulado por el usuario (detectado durante la confirmación).',
                         transaction: { token: token_ws, status: 'ABORTED' }
@@ -185,7 +171,6 @@ const validatePayment = async (req, res, next) => {
                 } else {
                     // Otro error durante el commit (problema de red, error interno de Transbank, etc.)
                     console.error("Error inesperado durante el commit:", commitError);
-                    // Podrías intentar consultar el estado aquí si quieres, pero por ahora devolvemos error genérico
                      await db.query("UPDATE transactions SET status = 'COMMIT_ERROR' WHERE transbank_token = $1", [token_ws]);
                     return res.status(500).json({
                         success: false,
@@ -205,9 +190,7 @@ const validatePayment = async (req, res, next) => {
             await db.query("UPDATE reservations SET estado_pago = 'Anulado' WHERE id = (SELECT reservation_id FROM transactions WHERE buy_order = $1 LIMIT 1)", [tbkOrdenCompra]);
 
             console.log("BD actualizada: Transacción y Reserva ANULADAS (flujo TBK_*).");
-            // NO intentes hacer commit aquí. Solo informa al usuario.
-            // Puedes redirigir al usuario a una página específica o devolver JSON.
-            return res.status(400).json({ // O redirigir res.redirect('/pago-cancelado');
+            return res.status(400).json({
                 success: false,
                 message: 'El pago fue anulado por el usuario.'
             });
@@ -223,7 +206,7 @@ const validatePayment = async (req, res, next) => {
 
             console.log("BD actualizada: Transacción y Reserva ANULADAS (Timeout).");
             // Informar al usuario del timeout.
-             return res.status(408).json({ // O redirigir res.redirect('/pago-timeout');
+             return res.status(408).json({
                 success: false,
                 message: 'El pago fue anulado por tiempo de espera.'
             });

@@ -16,7 +16,7 @@ router.post('/book', bookingController.createBooking);
 // Puedes añadir más rutas aquí
 
 //POST /api/shipping
-router.post('/shipping', shippingController.createShippingInfo);
+router.post('/shipping', shippingController.sendShipping);
 
 //POST /api/createPayment
 router.post('/createPayment', paymentController.createPayment);
