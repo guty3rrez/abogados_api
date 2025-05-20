@@ -13,8 +13,10 @@ router.get('/slots', slotsController.getAvailableSlots);
 // POST /api/book
 router.post('/book', bookingController.createBooking);
 
-// Puedes añadir más rutas aquí
-
+// POST /api/saveShippingAddress
+router.post('/saveShippingAddress', shippingController.saveShippingAddress);
+//POST /api/book
+router.post('/book', bookingController.createBooking);
 //POST /api/shipping
 router.post('/shipping', shippingController.sendShipping);
 
