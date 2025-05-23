@@ -54,8 +54,8 @@ Esta es una API backend construida con Node.js y Express para gestionar reservas
 
 1.  **Clona el repositorio:**
     ```bash
-    git clone <URL_DEL_REPOSITORIO>
-    cd <NOMBRE_DEL_DIRECTORIO_DEL_PROYECTO>
+    git clone https://github.com/guty3rrez/abogados_api.git
+    cd abogados_api
     ```
 
 2.  **Instala las dependencias:**
